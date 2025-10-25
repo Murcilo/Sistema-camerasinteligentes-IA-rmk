@@ -1,20 +1,19 @@
-import cv2
+import os
+import threading  # ### NOVO: Para processar IA em paralelo ###
 import time
+from collections import deque
+from queue import Queue  # ### NOVO: Para comunicação entre threads ###
+
+import cv2
 import torch
 from transformers import VideoMAEImageProcessor, VideoMAEForVideoClassification
-from PIL import Image
-import numpy as np
-import os
-from collections import deque  # ### MUDANÇA 1: Importar deque para criar o buffer ###
 
 
 class DetectorAnomalias:
     def __init__(self, video_source=0):
         self.cap = cv2.VideoCapture(video_source)
 
-        # ### MUDANÇA 2: Unificar para um único e poderoso modelo de VÍDEO ###
         print("🔄 Carregando modelo de análise de vídeo do Hugging Face...")
-        # Usaremos o VideoMAE treinado no Kinetics-400, que conhece centenas de ações.
         model_name = "MCG-NJU/videomae-base-finetuned-kinetics"
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -23,21 +22,24 @@ class DetectorAnomalias:
 
         print(f"✅ Modelo carregado com sucesso em '{self.device}'.\n")
 
-        # ### MUDANÇA 3: Criar um buffer para acumular frames para o clipe ###
-        # O modelo espera um clipe de 16 frames.
         self.frame_buffer = deque(maxlen=16)
 
-        # Parâmetros de gravação (sem alterações)
+        # Parâmetros de gravação
         self.gravando = False
         self.inicio_gravacao = None
         self.video_writer = None
-        self.duracao_gravacao = 10  # segundos
+        self.duracao_gravacao = 10
         self.pasta_videos = "videos_anomalias"
         if not os.path.exists(self.pasta_videos):
             os.makedirs(self.pasta_videos)
 
+        # ### NOVO: Controle de threading ###
+        self.fila_analise = Queue()  # Fila para enviar clipes para análise
+        self.analisando = False  # Flag para evitar múltiplas análises simultâneas
+        self.thread_analise = None
+
     def detectar_movimento(self, frame1, frame2, limiar_area=2000):
-        """Detecta movimento significativo entre dois frames. (Sem alterações)"""
+        """Detecta movimento significativo entre dois frames."""
         if frame1 is None or frame2 is None:
             return False
         diff = cv2.absdiff(frame1, frame2)
@@ -51,10 +53,8 @@ class DetectorAnomalias:
                 return True
         return False
 
-    # ### MUDANÇA 4: Função de classificação agora processa um VÍDEO (lista de frames) ###
     def classificar_video(self, video_clip):
         """Classifica um clipe de vídeo (lista de frames) usando o modelo VideoMAE."""
-        # Prepara o vídeo para o modelo
         inputs = self.processor(list(video_clip), return_tensors="pt").to(self.device)
 
         with torch.no_grad():
@@ -65,11 +65,41 @@ class DetectorAnomalias:
 
         return label.lower()
 
+    # ### NOVO: Função que roda em thread separada ###
+    def analisar_em_background(self, video_clip, frame_atual):
+        """Analisa o vídeo em uma thread separada para não travar o loop principal."""
+        try:
+            print("📸 Movimento detectado, enviando clipe para análise da IA...")
+
+            # AQUI acontece a demora (mas agora em background)
+            label = self.classificar_video(video_clip)
+
+            print(f"🔎 IA detectou a ação: '{label}'")
+
+            evento = None
+            # Condições de gravação baseadas na ação detectada
+            if any(palavra in label for palavra in ["fight", "punch", "kick", "hit"]):
+                evento = "violencia detectada"
+            elif any(palavra in label for palavra in ["running", "jumping", "falling", "climbing"]):
+                evento = "comportamento suspeito"
+            elif any(palavra in label for palavra in ["robbery", "burglary", "stealing"]):
+                evento = "atividade ilicita"
+
+            if evento:
+                print(f"🚨 Evento anômalo confirmado: {evento}")
+                self.iniciar_gravacao(frame_atual, evento)
+
+        finally:
+            # Libera a flag para permitir nova análise
+            self.analisando = False
+
     def iniciar_gravacao(self, frame, evento_detectado):
-        """Inicia gravação do vídeo. (Adicionado o nome do evento ao arquivo)"""
+        """Inicia gravação do vídeo."""
+        if self.gravando:
+            return  # Já está gravando
+
         altura, largura = frame.shape[:2]
         timestamp = int(time.time())
-        # Adiciona o tipo de evento ao nome do arquivo para fácil identificação
         nome = f"{evento_detectado.replace(' ', '_')}_{timestamp}.mp4"
         caminho = os.path.join(self.pasta_videos, nome)
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -83,7 +113,7 @@ class DetectorAnomalias:
             self.video_writer.write(buffered_frame)
 
     def processar(self):
-        """Loop principal com a nova lógica de buffer."""
+        """Loop principal com threading para análise não-bloqueante."""
         ret, frame_anterior = self.cap.read()
 
         if frame_anterior is not None:
@@ -101,30 +131,26 @@ class DetectorAnomalias:
 
             movimento = self.detectar_movimento(frame_anterior, frame_atual)
 
-            # ### MUDANÇA 5: Lógica de análise integrada ao buffer ###
-            # Se detectou movimento, não está gravando E o buffer está cheio
-            if movimento and not self.gravando and len(self.frame_buffer) == 16:
-                print("📸 Movimento detectado, enviando clipe para análise da IA...")
+            # ### MUDANÇA PRINCIPAL: Análise não-bloqueante ###
+            # Se detectou movimento, não está gravando, buffer cheio E não está analisando
+            if movimento and not self.gravando and len(self.frame_buffer) == 16 and not self.analisando:
+                # Marca que está analisando para evitar múltiplas threads
+                self.analisando = True
 
-                # Classifica o clipe inteiro que está no buffer
-                label = self.classificar_video(self.frame_buffer)
+                # Cria uma CÓPIA do buffer (importante!)
+                video_clip_copy = list(self.frame_buffer)
+                frame_copy = frame_atual.copy()
 
-                print(f"🔎 IA detectou a ação: '{label}'")
+                # Cria e inicia a thread de análise
+                self.thread_analise = threading.Thread(
+                    target=self.analisar_em_background,
+                    args=(video_clip_copy, frame_copy),
+                    daemon=True
+                )
+                self.thread_analise.start()
+                # O loop principal NÃO espera a thread terminar - continua imediatamente!
 
-                evento = None
-                # Condições de gravação baseadas na ação detectada
-                # As palavras-chave são baseadas nas classes do dataset Kinetics
-                if any(palavra in label for palavra in ["fight", "punch", "kick", "hit"]):
-                    evento = "violencia detectada"
-                elif any(palavra in label for palavra in ["running", "jumping", "falling", "climbing"]):
-                    evento = "comportamento suspeito"
-                elif any(palavra in label for palavra in ["robbery", "burglary", "stealing"]):
-                    evento = "atividade ilicita"
-
-                if evento:
-                    print(f"🚨 Evento anômalo confirmado: {evento}")
-                    self.iniciar_gravacao(frame_atual, evento)
-
+            # Gravação (continua normal)
             if self.gravando:
                 self.video_writer.write(frame_atual)
                 if time.time() - self.inicio_gravacao >= self.duracao_gravacao:
@@ -132,6 +158,7 @@ class DetectorAnomalias:
                     self.gravando = False
                     print("💾 Gravação finalizada.")
 
+            # Atualiza a tela (agora sem travar!)
             cv2.imshow("Detecção Inteligente", frame_atual)
             frame_anterior = frame_atual.copy()
 

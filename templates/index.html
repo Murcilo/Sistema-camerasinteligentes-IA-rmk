@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel de Monitoramento Inteligente</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <h1>PAINEL DE MONITORAMENTO INTELIGENTE</h1>
+            <p class="subtitle">Detecção de Comportamentos Anômalos em Tempo Real</p>
+        </header>
+
+        <!-- Controles -->
+        <div class="controls">
+            <button id="btnIniciar" class="btn btn-success" onclick="iniciarSistema()">
+                ▶️ Iniciar Sistema
+            </button>
+            <button id="btnParar" class="btn btn-danger" onclick="pararSistema()" disabled>
+                ⏹️ Parar Sistema
+            </button>
+        </div>
+
+        <!-- Layout Principal -->
+        <div class="main-layout">
+            <!-- Coluna Esquerda: Vídeo -->
+            <div class="video-section">
+                <h2>📹 Vídeo ao Vivo</h2>
+                <img id="videoFeed" src="{{ url_for('video_feed') }}" alt="Vídeo ao Vivo">
+            </div>
+
+            <!-- Coluna Direita: Alertas e Status -->
+            <div class="sidebar">
+                <!-- Alertas -->
+                <div class="alerts-section">
+                    <h2>⚠️ Alertas</h2>
+                    <div id="alertBox" class="alert-box">
+                        🟢 Nenhuma anomalia detectada
+                    </div>
+                </div>
+
+                <!-- Status -->
+                <div class="status-section">
+                    <h2>📊 Status do Sistema</h2>
+                    <div id="statusBox" class="status-box">
+                        <div class="status-item">
+                            <strong>Status:</strong> <span id="statusAtivo">🔴 Inativo</span>
+                        </div>
+                        <div class="status-item">
+                            <strong>Gravação:</strong> <span id="statusGravando">⚪ Aguardando</span>
+                        </div>
+                        <div class="status-item">
+                            <strong>IA:</strong> <span id="statusIA">✅ Pronto</span>
+                        </div>
+                    </div>
+
+                    <button class="btn btn-primary" onclick="iniciarGravacao()">
+                        🎥 Iniciar Nova Gravação
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Galeria de Vídeos -->
+        <div class="gallery-section">
+            <h2>📂 CLIPES DE ANOMALIAS GRAVADOS</h2>
+            <div id="videoGallery" class="video-gallery">
+                <p class="no-videos">Nenhum vídeo gravado ainda.</p>
+            </div>
+        </div>
+
+        <!-- Footer -->
+            </div>
+
+    <script>
+        // Atualiza status a cada segundo
+        setInterval(atualizarStatus, 1000);
+
+        // Atualiza galeria de vídeos a cada 5 segundos
+        setInterval(atualizarGaleria, 5000);
+
+        function iniciarSistema() {
+            fetch('/iniciar_sistema', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        document.getElementById('btnIniciar').disabled = true;
+                        document.getElementById('btnParar').disabled = false;
+                        mostrarNotificacao(data.message, 'success');
+                    } else {
+                        mostrarNotificacao(data.message, 'error');
+                    }
+                })
+                .catch(error => {
+                    mostrarNotificacao('Erro ao iniciar sistema', 'error');
+                });
+        }
+
+        function pararSistema() {
+            fetch('/parar_sistema', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        document.getElementById('btnIniciar').disabled = false;
+                        document.getElementById('btnParar').disabled = true;
+                        mostrarNotificacao(data.message, 'success');
+                    } else {
+                        mostrarNotificacao(data.message, 'error');
+                    }
+                })
+                .catch(error => {
+                    mostrarNotificacao('Erro ao parar sistema', 'error');
+                });
+        }
+
+        function atualizarStatus() {
+            fetch('/status')
+                .then(response => response.json())
+                .then(data => {
+                    // Atualiza status
+                    document.getElementById('statusAtivo').innerHTML =
+                        data.ativo ? '🟢 Ativo' : '🔴 Inativo';
+
+                    document.getElementById('statusGravando').innerHTML =
+                        data.gravando ? '🔴 Gravando' : '⚪ Aguardando';
+
+                    document.getElementById('statusIA').innerHTML =
+                        data.analisando ? '🔄 Analisando' : '✅ Pronto';
+
+                    // Atualiza alertas
+                    const alertBox = document.getElementById('alertBox');
+                    if (data.ultima_deteccao && data.ultima_deteccao.evento) {
+                        const evento = data.ultima_deteccao.evento.replace(/_/g, ' ');
+                        alertBox.innerHTML = `
+                            <div class="alert-warning">
+                                <strong>⚠️ ALERTA: ${evento.toUpperCase()}!</strong><br>
+                                Ação: ${data.ultima_deteccao.acao}<br>
+                                Confiança: ${data.ultima_deteccao.confianca}
+                            </div>
+                        `;
+                        alertBox.className = 'alert-box alert-active';
+                    } else {
+                        alertBox.innerHTML = '🟢 Nenhuma anomalia detectada';
+                        alertBox.className = 'alert-box';
+                    }
+                })
+                .catch(error => console.error('Erro ao atualizar status:', error));
+        }
+
+        function atualizarGaleria() {
+            fetch('/videos')
+                .then(response => response.json())
+                .then(videos => {
+                    const gallery = document.getElementById('videoGallery');
+
+                    if (videos.length === 0) {
+                        gallery.innerHTML = '<p class="no-videos">Nenhum vídeo gravado ainda.</p>';
+                    } else {
+                        gallery.innerHTML = videos.map(video => `
+                            <div class="video-card">
+                                <video controls>
+                                    <source src="/${video.caminho}" type="video/mp4">
+                                </video>
+                                <p class="video-title">${video.evento}</p>
+                                <p class="video-time">${video.timestamp}</p>
+                            </div>
+                        `).join('');
+                    }
+                })
+                .catch(error => console.error('Erro ao atualizar galeria:', error));
+        }
+
+        function iniciarGravacao() {
+            fetch('/iniciar_gravacao', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    mostrarNotificacao(data.message, data.status === 'success' ? 'success' : 'error');
+                })
+                .catch(error => {
+                    mostrarNotificacao('Erro ao iniciar gravação', 'error');
+                });
+        }
+
+        function mostrarNotificacao(mensagem, tipo) {
+            // Cria notificação simples
+            const notif = document.createElement('div');
+            notif.className = `notification notification-${tipo}`;
+            notif.textContent = mensagem;
+            document.body.appendChild(notif);
+
+            setTimeout(() => {
+                notif.style.opacity = '0';
+                setTimeout(() => notif.remove(), 300);
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
