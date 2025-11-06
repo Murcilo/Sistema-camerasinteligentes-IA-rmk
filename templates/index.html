@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Painel de Monitoramento Inteligente</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    
 </head>
 <body>
     <div class="container">
@@ -42,6 +43,13 @@
                     </div>
                 </div>
 
+                <div class="prompt-section">
+                    <h2>🛰️ Última Ação Detectada</h2>
+                    <div id="promptBox" class="prompt-box">
+                        Aguardando atividade...
+                    </div>
+                </div>
+
                 <!-- Status -->
                 <div class="status-section">
                     <h2>📊 Status do Sistema</h2>
@@ -56,6 +64,13 @@
                             <strong>IA:</strong> <span id="statusIA">✅ Pronto</span>
                         </div>
                     </div>
+
+                    <div class="chart-section">
+                    <h2>📈 Atividade de Eventos</h2>
+                    <div class="chart-container">
+                        <canvas id="activityChart"></canvas>
+                    </div>
+                </div>
 
                     <button class="btn btn-primary" onclick="iniciarGravacao()">
                         🎥 Iniciar Nova Gravação
@@ -74,13 +89,21 @@
 
         <!-- Footer -->
             </div>
-
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="{{ url_for('static', filename='grafico.js') }}" defer></script>
     <script>
         // Atualiza status a cada segundo
         setInterval(atualizarStatus, 1000);
 
-        // Atualiza galeria de vídeos a cada 5 segundos
-        setInterval(atualizarGaleria, 5000);
+        // ATUALIZAR GALERIA E GRÁFICO (APENAS UM TIMER)
+        setInterval(atualizarGaleriaEGrafico, 5000);
+        // A linha 'setInterval(atualizarGaleria, 5000);' foi REMOVIDA
+
+        // INICIALIZAR GRÁFICO QUANDO A PÁGINA CARREGAR
+        document.addEventListener('DOMContentLoaded', (event) => {
+            inicializarGrafico(); // Esta função está agora em grafico.js
+            atualizarGaleriaEGrafico(); // Carga inicial
+        });
 
         function iniciarSistema() {
             fetch('/iniciar_sistema', { method: 'POST' })
@@ -120,7 +143,7 @@
             fetch('/status')
                 .then(response => response.json())
                 .then(data => {
-                    // Atualiza status
+                    // --- Atualiza Status (sem alteração) ---
                     document.getElementById('statusAtivo').innerHTML =
                         data.ativo ? '🟢 Ativo' : '🔴 Inativo';
 
@@ -130,48 +153,91 @@
                     document.getElementById('statusIA').innerHTML =
                         data.analisando ? '🔄 Analisando' : '✅ Pronto';
 
-                    // Atualiza alertas
+                    
+                    // --- Lógica de Alertas e Prompt (MODIFICADA) ---
                     const alertBox = document.getElementById('alertBox');
-                    if (data.ultima_deteccao && data.ultima_deteccao.evento) {
-                        const evento = data.ultima_deteccao.evento.replace(/_/g, ' ');
-                        alertBox.innerHTML = `
-                            <div class="alert-warning">
-                                <strong>⚠️ ALERTA: ${evento.toUpperCase()}!</strong><br>
-                                Ação: ${data.ultima_deteccao.acao}<br>
-                                Confiança: ${data.ultima_deteccao.confianca}
-                            </div>
+                    const promptBox = document.getElementById('promptBox');
+                    
+                    if (data.ultima_deteccao) {
+                        // 1. LÓGICA DO NOVO PAINEL (PROMPT)
+                        // Sempre mostra a última ação detectada
+                        promptBox.innerHTML = `
+                            <strong>${data.ultima_deteccao.acao.toUpperCase()}</strong>
+                            <br>
+                            Confiança: ${data.ultima_deteccao.confianca}
+                            <br>
+                            (${data.ultima_deteccao.timestamp})
                         `;
-                        alertBox.className = 'alert-box alert-active';
+                        promptBox.className = 'prompt-box prompt-active';
+
+
+                        // 2. LÓGICA ANTIGA (ALERTAS)
+                        // Só ativa se for um 'evento' (anomalia)
+                        if (data.ultima_deteccao.evento) {
+                            const evento = data.ultima_deteccao.evento.replace(/_/g, ' ');
+                            alertBox.innerHTML = `
+                                <div class="alert-warning">
+                                    <strong>⚠️ ALERTA: ${evento.toUpperCase()}!</strong><br>
+                                    Ação: ${data.ultima_deteccao.acao}
+                                </div>
+                            `;
+                            alertBox.className = 'alert-box alert-active';
+                        } else {
+                            // Se a última ação não foi um evento, o alerta fica verde
+                            alertBox.innerHTML = '🟢 Nenhuma anomalia detectada';
+                            alertBox.className = 'alert-box';
+                        }
+
                     } else {
+                        // Estado inicial (sem detecções)
                         alertBox.innerHTML = '🟢 Nenhuma anomalia detectada';
                         alertBox.className = 'alert-box';
+                        promptBox.innerHTML = 'Aguardando atividade...';
+                        promptBox.className = 'prompt-box';
                     }
                 })
                 .catch(error => console.error('Erro ao atualizar status:', error));
         }
 
-        function atualizarGaleria() {
+        // ***** INÍCIO DA CORREÇÃO *****
+
+        // 1. ESTA É A FUNÇÃO QUE ESTAVA FALTANDO (ou estava com o nome errado)
+        // Ela busca os dados UMA VEZ e distribui para as outras funções.
+        function atualizarGaleriaEGrafico() {
             fetch('/videos')
                 .then(response => response.json())
                 .then(videos => {
-                    const gallery = document.getElementById('videoGallery');
-
-                    if (videos.length === 0) {
-                        gallery.innerHTML = '<p class="no-videos">Nenhum vídeo gravado ainda.</p>';
-                    } else {
-                        gallery.innerHTML = videos.map(video => `
-                            <div class="video-card">
-                                <video controls>
-                                    <source src="/${video.caminho}" type="video/mp4">
-                                </video>
-                                <p class="video-title">${video.evento}</p>
-                                <p class="video-time">${video.timestamp}</p>
-                            </div>
-                        `).join('');
-                    }
+                    // Envia os dados para as duas funções
+                    atualizarGaleria(videos);
+                    atualizarGrafico(videos); // Esta função está em grafico.js
                 })
-                .catch(error => console.error('Erro ao atualizar galeria:', error));
+                .catch(error => console.error('Erro ao atualizar dados:', error));
         }
+
+        // 2. ESTA FUNÇÃO FOI MODIFICADA
+        // Ela agora recebe 'videos' e não busca mais dados por conta própria.
+        function atualizarGaleria(videos) { 
+            // A linha 'fetch('/videos')' foi REMOVIDA daqui
+            
+            const gallery = document.getElementById('videoGallery');
+
+            if (videos.length === 0) {
+                gallery.innerHTML = '<p class="no-videos">Nenhum vídeo gravado ainda.</p>';
+            } else {
+                gallery.innerHTML = videos.map(video => `
+                    <div class="video-card">
+                        <video controls>
+                            <source src="/${video.caminho}" type="video/mp4">
+                        </video>
+                        <p class="video-title">${video.evento}</p>
+                        <p class="video-time">${video.timestamp}</p>
+                    </div>
+                `).join('');
+            }
+        }
+        
+        // ***** FIM DA CORREÇÃO *****
+
 
         function iniciarGravacao() {
             fetch('/iniciar_gravacao', { method: 'POST' })

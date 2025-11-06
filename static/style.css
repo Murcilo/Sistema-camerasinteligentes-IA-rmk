@@ -15,6 +15,7 @@ body {
     max-width: 1400px;
     margin: 0 auto;
     padding: 2rem;
+    padding-top: 0; 
 }
 
 /* Header */
@@ -97,6 +98,7 @@ h2 {
     background-color: #2A2A2A;
     padding: 1.5rem;
     border-radius: 10px;
+    align-self: start; 
 }
 
 #videoFeed {
@@ -257,6 +259,50 @@ footer {
     background: #4CAF50;
     border-radius: 4px;
 }
+
+/* ... (todos os estilos existentes) ... */
+
+/* NOVO: Seção do Gráfico */
+.chart-section {
+    background-color: #2A2A2A;
+    padding: 1.5rem;
+    border-radius: 10px;
+}
+
+/* Define uma altura fixa para o container do gráfico */
+.chart-container {
+    position: relative;
+    height: 250px; 
+    width: 100%;
+}
+
+
+/* ... (todo o seu CSS existente) ... */
+
+/* NOVO: Seção de Prompt (Última Ação) */
+.prompt-section {
+    background-color: #2A2A2A;
+    padding: 1.5rem;
+    border-radius: 10px;
+}
+
+.prompt-box {
+    background-color: #3A3A3A;
+    padding: 1rem;
+    border-radius: 8px;
+    text-align: center;
+    color: #A0A0A0; /* Cor suave por padrão */
+    font-size: 0.95rem;
+    line-height: 1.5;
+    transition: color 0.3s ease;
+}
+
+/* Estilo para quando uma ação for detectada */
+.prompt-box.prompt-active {
+    color: #FFFFFF;
+    font-weight: 600;
+}
+/* ... (Restante do CSS, incluindo o @media) ... */
 
 /* Responsivo */
 @media (max-width: 968px) {

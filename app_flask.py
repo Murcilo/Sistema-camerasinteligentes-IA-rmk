@@ -93,6 +93,8 @@ def get_status():
             ultima_det = {
                 'acao': detector.ultima_deteccao['acao'],
                 'evento': detector.ultima_deteccao['evento'],
+
+                'confianca': detector.ultima_deteccao.get('confianca', 'N/D'),
                 'timestamp': detector.ultima_deteccao['timestamp'].strftime('%H:%M:%S')
             }
 
